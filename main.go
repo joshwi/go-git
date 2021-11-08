@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"io/ioutil"
 	"log"
 	"os"
 	"path/filepath"
@@ -21,32 +20,51 @@ var (
 	GIT_URL   = utils.Env("GIT_URL")
 	GIT_USER  = utils.Env("GIT_USER")
 	GIT_TOKEN = utils.Env("GIT_TOKEN")
+	GIT_EMAIL = utils.Env("GIT_EMAIL")
 )
 
-func Clone(url string, directory string) (*git.Repository, error) {
+// Project struct for Git
+type Project struct {
+	Name      string
+	Directory string
+	Url       string
+	Token     string
+	User      string
+	Email     string
+	Repo      *git.Repository
+	WorkTree  *git.Worktree
+}
+
+func (p Project) Clone(directory string) (Project, error) {
 
 	response := fmt.Sprintf(`[ Function: Clone ] [ Directory: %v ] [ Status: Success ]`, directory)
 
 	repo := &git.Repository{}
 
 	repo, err := git.PlainClone(directory, false, &git.CloneOptions{
-		URL:      url,
+		URL:      p.Url,
 		Progress: os.Stdout,
 	})
+
+	p.Repo = repo
+
+	tree, err := p.Repo.Worktree()
+
+	p.WorkTree = tree
 
 	if err != nil {
 		response = fmt.Sprintf(`[ Function: Clone ] [ Directory: %v ] [ Status: Failed ] [ Error: %v ]`, directory, err)
 		log.Println(response)
-		return repo, err
+		return p, err
 	}
 
 	log.Println(response)
 
-	return repo, nil
+	return p, nil
 
 }
 
-func Open(directory string) (*git.Repository, error) {
+func (p Project) Open(directory string) (Project, error) {
 
 	response := fmt.Sprintf(`[ Function: Open ] [ Directory: %v ] [ Status: Success ]`, directory)
 
@@ -54,104 +72,102 @@ func Open(directory string) (*git.Repository, error) {
 
 	repo, err := git.PlainOpen(directory)
 
+	p.Repo = repo
+
+	tree, err := p.Repo.Worktree()
+
+	p.WorkTree = tree
+
 	if err != nil {
 		response = fmt.Sprintf(`[ Function: Open ] [ Directory: %v ] [ Status: Failed ] [ Error: %v ]`, directory, err)
-		log.Println(response)
-		return repo, err
+		log.Fatalf(response)
+		return p, err
 	}
 
 	log.Println(response)
 
-	return repo, nil
+	return p, nil
 
 }
 
-func Add(tree *git.Worktree, directory string) (*git.Worktree, error) {
+func (p Project) Add() error {
 
-	filename := filepath.Join(directory, "md5.txt")
-	response := fmt.Sprintf(`[ Function: Add ] [ Filename: %v ] [ Status: Success ]`, filename)
-	err := ioutil.WriteFile(filename, []byte("1234567890"), 0644)
+	response := fmt.Sprintf(`[ Function: Add ] [ Repo: %v ] [ Status: Success ]`, p.Name)
 
-	if err != nil {
-		response = fmt.Sprintf(`[ Function: Add ] [ Filename: %v ] [ Status: Failed ] [ Error: %v ]`, filename, err)
-		log.Println(response)
-		return nil, err
-	}
-
-	_, err = tree.Add("md5.txt")
+	_, err := p.WorkTree.Add(".")
 
 	if err != nil {
-		response = fmt.Sprintf(`[ Function: Add ] [ Filename: %v ] [ Status: Failed ] [ Error: %v ]`, filename, err)
-		log.Println(response)
-		return nil, err
+		response = fmt.Sprintf(`[ Function: Add ] [ Repo: %v ] [ Status: Failed ] [ Error: %v ]`, p.Name, err)
+		log.Fatalf(response)
+		return err
 	}
 
 	log.Println(response)
 
-	return tree, nil
+	return nil
 
 }
 
-func Commit(repo *git.Repository, tree *git.Worktree, message string) (*git.Worktree, error) {
+func (p Project) Commit(message string) error {
 
 	response := fmt.Sprintf(`[ Function: Commit ] [ Message: %v ] [ Status: Success ]`, message)
 
-	commit, err := tree.Commit(message, &git.CommitOptions{
+	commit, err := p.WorkTree.Commit(message, &git.CommitOptions{
 		Author: &object.Signature{
-			Name:  "example",
-			Email: "example@email.com",
+			Name:  p.User,
+			Email: p.Email,
 			When:  time.Now(),
 		},
 	})
 
 	if err != nil {
 		response = fmt.Sprintf(`[ Function: Commit ] [ Message: %v ] [ Status: Failed ] [ Error: %v ]`, message, err)
-		log.Println(response)
-		return nil, err
+		log.Fatalf(response)
+		return err
 	}
 
-	_, err = repo.CommitObject(commit)
+	_, err = p.Repo.CommitObject(commit)
 
 	if err != nil {
 		response = fmt.Sprintf(`[ Function: Commit ] [ Message: %v ] [ Status: Failed ] [ Error: %v ]`, message, err)
-		log.Println(response)
-		return nil, err
+		log.Fatalf(response)
+		return err
 	}
 
 	log.Println(response)
 
-	return tree, nil
+	return nil
 
 }
 
-func Push(repo *git.Repository, name string) (*git.Repository, error) {
+func (p Project) Push() error {
 
-	response := fmt.Sprintf(`[ Function: Push ] [ Repo: %v ] [ Status: Success ]`, name)
+	response := fmt.Sprintf(`[ Function: Push ] [ Repo: %v ] [ Status: Success ]`, p.Name)
 
-	err := repo.Push(&git.PushOptions{
+	err := p.Repo.Push(&git.PushOptions{
 		Auth: &http.BasicAuth{
-			Username: GIT_USER,
-			Password: GIT_TOKEN,
+			Username: p.User,
+			Password: p.Token,
 		},
 	})
 
 	if err != nil {
-		response = fmt.Sprintf(`[ Function: Push ] [ Repo: %v ] [ Status: Failed ] [ Error: %v ]`, name, err)
-		log.Println(response)
-		return nil, err
+		response = fmt.Sprintf(`[ Function: Push ] [ Repo: %v ] [ Status: Failed ] [ Error: %v ]`, p.Name, err)
+		log.Fatalf(response)
+		return err
 	}
 
 	log.Println(response)
 
-	return repo, nil
+	return nil
 
 }
 
-func Branches(repo *git.Repository, name string) ([]string, error) {
+func (p Project) Branches(name string) ([]string, error) {
 
 	output := []string{}
 
-	branches, err := repo.Branches()
+	branches, err := p.Repo.Branches()
 
 	if err != nil {
 		response := fmt.Sprintf(`[ Function: Branches ] [ Repo: %v ] [ Status: Failed ] [ Error: %v ]`, name, err)
@@ -168,85 +184,70 @@ func Branches(repo *git.Repository, name string) ([]string, error) {
 
 }
 
-func Branch(repo *git.Repository, name string, branch string) (*git.Repository, error) {
+func (p Project) Branch(name string, branch string) error {
 
 	branch_name := fmt.Sprintf("refs/heads/%v", branch)
 
-	headRef, err := repo.Head()
+	headRef, err := p.Repo.Head()
 
 	ref := plumbing.NewHashReference(plumbing.ReferenceName(branch_name), headRef.Hash())
 
-	// The created reference is saved in the storage.
-	err = repo.Storer.SetReference(ref)
+	err = p.Repo.Storer.SetReference(ref)
 
 	if err != nil {
 		response := fmt.Sprintf(`[ Function: Branch ] [ Repo: %v ] [ Branch: %v ] [ Status: Failed ] [ Error: %v ]`, name, branch, err)
-		log.Println(response)
-		return repo, err
+		log.Fatalf(response)
+		return err
 	}
 
-	return repo, nil
+	return nil
 
 }
 
 func main() {
 
+	day := time.Now().Format("2006-01-02")
+
 	name := "nfldb-backup"
 
 	dir := filepath.Join(DIRECTORY + "/" + name)
 
-	repo, err := Clone(GIT_URL, dir)
-
-	repo, err = Open(dir)
-
-	if err != nil {
-		log.Fatal(err)
+	project := Project{
+		Name:      name,
+		Directory: dir,
+		Url:       GIT_URL,
+		Token:     GIT_TOKEN,
+		User:      GIT_USER,
+		Email:     GIT_EMAIL,
 	}
 
-	branches, err := Branches(repo, name)
-
-	if err != nil {
-		log.Fatal(err)
+	_, err := os.Stat(dir)
+	if os.IsNotExist(err) {
+		project, err = project.Clone(dir)
+	} else {
+		project, err = project.Open(dir)
 	}
+
+	branches, err := project.Branches(name)
 
 	log.Println(branches)
 
-	repo, err = Branch(repo, name, "v1")
+	err = project.Branch(name, day)
 
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	branches, err = Branches(repo, name)
-
-	if err != nil {
-		log.Fatal(err)
-	}
+	branches, err = project.Branches(name)
 
 	log.Println(branches)
 
-	// tree, err := repo.Worktree()
+	err = utils.Write(dir, "nfl.txt", "chiefs\nchargers\nraiders\nbroncos\n", 0777)
 
-	// if err != nil {
-	// 	log.Fatal(err)
-	// }
+	if err != nil {
+		log.Fatal(err)
+	}
 
-	// tree, err = Add(tree, dir)
+	err = project.Add()
 
-	// if err != nil {
-	// 	log.Fatal(err)
-	// }
+	err = project.Commit(fmt.Sprintf("DB backup: %v", time.Now().Format(time.RFC3339)))
 
-	// tree, err = Commit(repo, tree, "test commit message")
-
-	// if err != nil {
-	// 	log.Fatal(err)
-	// }
-
-	// repo, err = Push(repo, name)
-
-	// if err != nil {
-	// 	log.Fatal(err)
-	// }
+	err = project.Push()
 
 }
